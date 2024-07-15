@@ -1,0 +1,472 @@
+#!/bin/bash
+#########################################################
+#		      WRF Install Script     			        #
+# This Script was based on the framework provided by    #
+# https://github.com/bakamotokatas/WRF-Install-Script,  #
+# rewritten by uho-33.                                  #
+# To execute this script "bash wrf_install"	            #
+#########################################################
+type="ARW"
+#########################################################
+#     WRF and WPS compile configure                     #
+#########################################################
+# In default, this script will choose 'dmpar' mode of WRF and basic type of nesting. 
+# For WPS, this script will choose 'serial' mode in defult.
+# For more information, see https://www2.mmm.ucar.edu/wrf/OnLineTutorial/Compile/wrf_compile2.php 
+# and https://www2.mmm.ucar.edu/wrf/OnLineTutorial/Compile/wps_compile2.php.
+# If you have specific requirements, change the value below:
+
+WRF_config1=34 # WRF mode for compiling in parallel
+WRF_config2=1 # WRF type of nesting
+WPS_config=1 # WPS mode
+
+##########################################################
+if [ -n "$1" ]; then
+    if [ "$1" = "-chem" ]; then
+        type="Chem"
+    elif [ "$1" = "-arw" ]; then
+        type="ARW"
+    elif [ "$1" = "-hydro" ]; then
+        type="Hydro"
+    else
+        echo "Unrecognized option, please run as"
+        echo "For WRF-ARW \"bash WRF${WRFversion}_Install.bash -arw\""
+        echo "For WRF-Chem \"bash WRF${WRFversion}_Install.bash -chem\""
+	echo "For WRF-Hydro \"bash WRF${WRFversion}_Install.bash -hydro\""
+        exit
+    fi
+fi
+echo "############################################################"
+echo "Welcome! This Script will install the WRF${WRFversion}-${type}"
+echo "Installation may take several hours and it takes 52 GB storage. Be sure that you have enough time and storage."
+echo "Please run this script in the place where you want to install WRF and WPS."
+echo "############################################################"
+#########################################################
+#	Controls					                        #
+#########################################################
+
+if [ "$EUID" -eq 0 ]
+  then echo "ERROR: Running this script as root or sudo, is not suggested"
+  exit
+fi
+osbit=$(uname -m)
+if [ "$osbit" = "x86_64" ]; then
+        echo "64 bit operating system is used"
+else
+        echo "Sorry! This script was written for 64 bit operating systems."
+exit
+fi
+local_language=$(locale | grep LANG | grep tr_TR)
+if [ -n "$local_language" ]; then
+ echo "Merhaba, WRF modelinin kodundaki hatadan dolayı, WRF kurulumu işletim sistemi dili Türkçe olduğunda, Türkçedeki i ve ı harflerinin farklı olması sebebiyle hata vermektedir. Lütfen işletim sisteminizin dilini başka bir dile çevirip yeniden çalıştırınız. Kurulum bittikten sonra işletim sistemi dilini tekrar Türkçe'ye çevirebilirsiniz."
+ exit
+fi
+wget_path=$(which wget)
+if [ -z "$wget_path" ]; then
+    echo "ERROR: Can not find wget. Please install it, then try again."
+    exit 1
+fi
+
+csh_status=$(which csh)
+if [ -z "$csh_status" ]; then
+ echo "ERROR: Can not find csh. Please install it, then try again."
+ exit 1
+fi
+#########################################################
+#   Test and install conda                              #
+#########################################################
+# Ensure input is not empty
+get_non_empty_input() {
+    local input=""
+    while [ -z "$input" ]; do
+        read -p "$1" -e input
+    done
+    echo "$input"
+}
+
+check_input() {
+    local input_var_name=$1
+    local input_value
+    input_value=$(eval echo \$${input_var_name})
+    if [ "$input_value" != "n" ] && [ "$input_value" != "y" ]; then
+        while [ "$input_value" != "n" ] && [ "$input_value" != "y" ]; do
+            echo "Unrecognizable input, please enter again:"
+            read input_value
+        done
+        eval "$input_var_name=\"$input_value\""
+    fi
+}
+
+
+# Check whether conda exists
+eval "$(cat ~/.bashrc | tail -n +10)"
+conda_status=$(which conda)
+
+# Set conda path
+if [ -n "$conda_status" ]; then
+    echo "Found conda in $(which conda). It will be used to install packages."
+    env_exist=$(conda env list | grep '^WRF')
+    echo "In default, necessary package will install in environment 'WRF'"
+    if [ -n "$env_exist" ]; then
+        env_status=$(get_non_empty_input "The environment 'WRF' has exited. Do you want to install in it? [y/n] ")
+        if [ "$env_status" = "y" ]; then
+            env_name=WRF
+        fi
+    else 
+        env_status=$(get_non_empty_input "Do you want to use this name? [y/n] ")
+        check_input env_status
+        if [ "$env_status" = "y" ]; then
+            env_name=WRF
+        fi
+    fi
+else
+    conda_loc_status=$(get_non_empty_input "Conda is not installed. In default, it will be installed in ${HOME}/miniconda3. [y/n] ")
+    check_input conda_loc_status
+    if [ "$conda_loc_status" = "n" ]; then
+        while [ "$conda_loc_status" = "n" ]; do
+            conda_path=$(get_non_empty_input "Please enter the path where the Miniconda will be installed: ")
+            conda_path=$(eval echo "$conda_path/miniconda3")
+            conda_loc_status=$(get_non_empty_input "Miniconda will be installed in ${conda_path}. [y/n] ")
+            check_input conda_loc_status
+        done
+    elif [ "$conda_loc_status" = "y" ]; then
+        conda_path=$(eval echo "${HOME}/miniconda3")
+    fi
+    env_exist=""
+    echo "In default, necessary package will install in environment 'WRF'."
+    env_status=$(get_non_empty_input "Do you want to use this name? [y/n] ")
+    check_input env_status
+    if [ "$env_status" = "y" ]; then
+        env_name=WRF
+    fi
+fi
+
+# Set environment name
+if [ "$env_status" = "n" ]; then
+    while [ "$env_status" = "n" ]; do
+        env_name=$(get_non_empty_input "Please enter your environment's name: ")
+        env_status=$(get_non_empty_input "Your environment's name is ${env_name}. [y/n] ")
+        check_input env_status
+        if [ -n "$conda_status" ]; then
+            env_exist=$(conda env list | grep ^${env_name})
+            if [ -n "$env_exist" ]; then
+                env_status=$(get_non_empty_input "The environment has exited. Do you want to install in it? [y/n] ")
+                check_input env_status
+                if [ "$env_status" = "y" ]; then
+                    conda activate $env_name
+                fi
+            fi
+        fi
+    done
+fi
+
+# Install conda
+if [ -z "$conda_status" ]; then
+    mkdir -p $conda_path
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O $conda_path/miniconda.sh
+    if [ $? -ne 0 ]; then
+        echo "Failed to download Miniconda. Exiting the script."
+        exit 1
+    fi
+    bash $conda_path/miniconda.sh -b -u -p $conda_path
+    rm -rf $conda_path/miniconda.sh
+    $conda_path/bin/conda init bash
+    eval "$(cat ~/.bashrc | tail -n +10)"
+    conda_status=$(which conda)
+    if [ -z "$conda_status" ]; then
+        echo "failed to install conda. Please try again or install matually."
+        exit 1
+    else
+        echo "Successfully install Miniconda!"
+    fi
+fi
+
+
+#########################################################
+#   Installing necessary packages                       #
+#########################################################
+
+# By Conda #
+######################
+
+if [ "$type" = "Chem" ]; then
+ extra_packages="flex bison"
+fi
+
+###
+packagelist="git make cmake gfortran gcc=12.2.0 m4 curl perl libpng netcdf4 libnetcdf netcdf-fortran jasper=1.900.1 zlib ${extra_packages}"
+package4checks="git make cmake gfortran gcc m4 curl perl libpng netcdf4 libnetcdf netcdf-fortran jasper zlib ${extra_packages}"
+packagesnotinstalled=no
+
+if [ -z "$env_exist" ]; then
+    conda create -n $env_name $packagelist -c conda-forge -y
+    conda activate $env_name
+else
+    conda activate ${env_name}
+    for packagecheck in $package4checks; do
+    packagechecked=$(conda list | grep -w $packagecheck)
+    if [ -z "$packagechecked" ]; then
+        packagesnotinstalled=yes
+        break
+    fi
+    done
+    if [ "$packagesnotinstalled" = "yes" ]; then
+        conda install $packagelist -c conda-forge -y
+    fi
+fi
+
+packagesnotinstalled="no"
+
+for packagecheck in $package4checks; do
+    packagechecked=$(conda list | grep -w $packagecheck)
+    if [ -z "$packagechecked" ]; then
+        echo "$packagecheck not installed"
+        packagesnotinstalled=yes
+    fi
+done
+
+if [ "$packagesnotinstalled" = "yes" ]; then
+    echo "Some packages were not installed, please install the missing packages and re-run the script."
+    exit 1
+fi
+
+# Compile mpich#
+######################
+mpicc_status=$(which mpicc)
+mpiexec_status=$(which mpiexec)
+DIR=$(pwd)
+if [ -z "$mpicc_status" ] || [ -z "$mpiexec_status" ]; then
+    echo "cannot found mpich."
+    echo "mpich will be installed..."
+    mkdir Build_WRF
+    cd Build_WRF
+    mkdir packages
+    mkdir mpich
+    cd packages
+    wget https://www.mpich.org/static/downloads/4.2.2/mpich-4.2.2.tar.gz -O mpich-4.2.2.tar.gz
+    if [ $? -ne 0 ]; then
+    echo "Failed to download mpich. Please try re-run or download manually. Exiting the script."
+    exit 1
+    fi
+    tar xzvf mpich-4.2.2.tar.gz
+    cd mpich-4.2.2
+    ./configure --prefix="$DIR/Build_WRF/mpich/"
+    make 2>&1 | tee log.m
+    make install 2>&1 | tee log.mi
+    export PATH=$DIR/Build_WRF/mpich/bin:$PATH
+    mpicc_status=$(which mpicc)
+    mpiexec_status=$(which mpiexec)
+    if [ -z "$mpicc_status" ] || [ -z "$mpiexec_status" ]; then
+        echo "Failed to install mpich. Please try re-run or install it manually."
+        exit 1
+    fi
+    export MPICH_DIR=${DIR}/Build_WRF/mpich/
+else
+    export MPICH_DIR=$(dirname $(which mpicc))/..
+    echo "Find mpich in $MPICH_DIR. It will be used to compile WRF."
+fi
+echo "All required packages are installed."
+#########################################
+echo "" >> ~/.bashrc
+bashrc_exports=("#WRF Variables" "export PATH=${MPICH_DIR}/bin:$PATH" "export CC=gcc" "export CXX=g++" "export FC=gfortran" "export FCFLAGS=-m64" "export F77=gfortran" "export FFLAGS=-m64"
+		"export NETCDF=${CONDA_PREFIX}" "export HDF5=${CONDA_PREFIX}" "export LDFLAGS=-L${CONDA_PREFIX}/lib"
+		"export CPPFLAGS=-I${CONDA_PREFIX}/include" "export LD_LIBRARY_PATH=${MPICH_DIR}/lib:${CONDA_PREFIX}/lib" "export MPI_LIB=${MPICH_DIR}/lib" "export JASPERLIB=${CONDA_PREFIX}/lib" "export JASPERINC=${CONDA_PREFIX}/include")
+for bashrc_export in "${bashrc_exports[@]}" ; do
+[[ -z $(grep "${bashrc_export}" ~/.bashrc) ]] && echo "${bashrc_export}" >> ~/.bashrc
+done
+export CC=gcc
+export CXX=g++
+export FC=gfortran
+export FCFLAGS=-m64
+export F77=gfortran
+export FFLAGS=-m64
+export NETCDF=${CONDA_PREFIX}
+export HDF5=${CONDA_PREFIX}
+export LDFLAGS=-L${CONDA_PREFIX}/lib
+export CPPFLAGS=-I${CONDA_PREFIX}/include
+export LD_LIBRARY_PATH=${MPICH_DIR}/lib:${CONDA_PREFIX}/lib:$LD_LIBRARY_PATH
+export MPI_LIB=-L${MPICH_DIR}/lib
+export MPI_INCLUDE_DIR=${MPICH_DIR}/include
+export JASPERLIB=${CONDA_PREFIX}/lib
+export JASPERINC=${CONDA_PREFIX}/include
+if [ "$type" = "Chem" ]; then
+[[ -z $(grep "export FLEX_LIB_DIR=${CONDA_PREFIX}/lib" ~/.bashrc) ]] && echo "export FLEX_LIB_DIR=${CONDA_PREFIX}/lib" >> ~/.bashrc
+[[ -z $(grep "export YACC='yacc -d'" ~/.bashrc) ]] && echo "export YACC='yacc -d'" >> ~/.bashrc
+export FLEX_LIB_DIR=${CONDA_PREFIX}/lib
+export YACC='yacc -d'
+fi
+#########################################
+#	WRF Installation		            #
+#########################################
+cd $DIR
+skip_wrf_status="n"
+if [ -d "WRF" ]; then
+    skip_wrf_status=$(get_non_empty_input "WARNING: WRF has existed. Do you want to skip install it? [y/n] ")
+    check_input skip_wrf_status
+fi  
+if [ "$skip_wrf_status" = "n" ]; then
+    install_WRF_by_prec_status="n"
+    [ -d "WRF" ] && install_WRF_by_prec_status=$(get_non_empty_input "Do you want to install using the pre-cloned repository? [y/n] ")
+    if [ "$install_WRF_by_prec_status" = "n" ]; then
+        [ -d "WRF" ] && mv WRF WRF-old
+        git clone --recurse-submodules https://github.com/wrf-model/WRF
+        # Ensure download successfully
+        if [ $? -ne 0 ]; then
+            echo "Failed to clone the repository. Exiting the script."
+            exit 1
+        fi
+    fi
+
+    if [ "$type" = "Hydro" ]; then
+        export WRF_HYDRO=1
+        cd Build_WRF/packages
+        [ -f "v5.2.0.tar.gz" ] && mv v5.2.0.tar.gz v5.2.0.tar.gz-old
+        wget https://github.com/NCAR/wrf_hydro_nwm_public/archive/refs/tags/v5.2.0.tar.gz -O v5.2.0.tar.gz
+        tar -zxvf v5.2.0.tar.gz
+        /bin/cp -rf wrf_hydro_nwm_public-5.2.0/trunk/NDHMS/* $DIR/WRF/hydro/
+        rm v5.2.0.tar.gz
+        rm -r wrf_hydro_nwm_public-5.2.0
+        cd $DIR
+    fi
+    cd WRF
+    ./clean -a
+    if [ "$type" = "Chem" ]; then
+    export WRF_CHEM=1
+    export WRF_KPP=1
+    fi
+
+    ( echo ${WRF_config1} ; echo ${WRF_config2} ) | ./configure
+    sed -i 's#-L/usr/lib -lnetcdff -lnetcdf#-L${NETCDF}/lib -lnetcdff -lnetcdf#g' configure.wrf
+    sed -i 's#LIB_EXTERNAL    = \\#LIB_EXTERNAL    = $(MPI_LIB) -lmpifort -lmpicxx -lmpi  \\#g' configure.wrf
+    sed -i 's|-I$(NETCDFPATH)/include \\|-I$(NETCDFPATH)/include -I$(MPICH_DIR)/include \\|' configure.wrf
+    # cp -r $MPICH_DIR/include $NETCDF/include
+    gfortversion=$(gfortran -dumpversion | cut -d '.' -f 1)
+    if [ "$gfortversion" -lt 8 ] && [ "$gfortversion" -ge 6 ]; then
+    sed -i '/-DBUILD_RRTMG_FAST=1/d' configure.wrf
+    fi
+
+    logsave log.compile ./compile em_real
+
+    if [ -n "$(grep "Problems building executables, look for errors in the build log" log.compile)" ]; then
+            echo "Sorry, There were some errors while installing WRF."
+            echo "Please create new issue for the problem, https://github.com/uho-33/script-for-instal-WRF/issues"
+            exit
+    fi
+    cd ..
+fi
+# [ -d "WRF-${WRFversion}-${type}" ] && mv WRF-${WRFversion}-${type} WRF-${WRFversion}-${type}-old
+# mv WRFV${WRFversion} WRF-${WRFversion}-${type}
+#########################################
+#	WPS Installation		            #
+#########################################
+skip_wps_status="n"
+if [ -d "WPS" ]; then
+    skip_wps_status=$(get_non_empty_input "WARNING: WPS has existed. Do you want to skip install it? [y/n] ")
+    check_input skip_wps_status
+fi  
+if [ "$skip_wps_status" = "n" ]; then
+    install_WPS_by_prec_status="n"
+    [ -d "WPS" ] && install_WPS_by_prec_status=$(get_non_empty_input "Do you want to install using the pre-cloned repository? [y/n] ")
+    if [ "$install_WRF_by_prec_status" = "n" ]; then
+        git clone https://github.com/wrf-model/WPS
+        if [ $? -ne 0 ]; then
+            echo "Failed to clone the repository. Exiting the script."
+            exit 1
+        fi
+    fi
+    cd WPS
+    ./clean -a
+    sed -i '163s/.*/    NETCDFF="-lnetcdff"/' configure
+    echo ${WPS_config} | ./configure
+    logsave log.compile ./compile
+    sed -i "s# geog_data_path.*# geog_data_path = '../WPS_GEOG/'#" namelist.wps
+    cd ..
+fi
+#########################################
+#	Opening Geog Data Files 	#
+#########################################
+if [ -d "WPS_GEOG" ]; then
+  echo "WRF and WPS are installed successfully"
+  echo "Directory WPS_GEOG is already exists."
+  echo "Do you want WPS_GEOG files to be redownloaded and reexracted?"
+  while [ -z "$GEOG_validation" ]; do
+    GEOG_validation=$(get_non_empty_input "please enter [y/n]")
+    if [ ${GEOG_validation} = "y" ]; then
+        wget https://www2.mmm.ucar.edu/wrf/src/wps_files/geog_high_res_mandatory.tar.gz -O geog_high_res_mandatory.tar.gz
+        tar -zxvf geog_high_res_mandatory.tar.gz
+    elif [ ${GEOG_validation} = "n" ]; then
+        echo "You can download it later from http://www2.mmm.ucar.edu/wrf/src/wps_files/geog_high_res_mandatory.tar.gz and extract it"
+    else
+        echo "Unrecognizable input, please enter again."
+        GEOG_validation=""
+    fi
+  done
+else
+wget https://www2.mmm.ucar.edu/wrf/src/wps_files/geog_high_res_mandatory.tar.gz -O geog_high_res_mandatory.tar.gz
+tar -zxvf geog_high_res_mandatory.tar.gz
+fi
+if [ "$type" = "Chem" ]; then
+ cd WPS_GEOG
+ Chem_Geog="modis_landuse_21class_30s soiltype_top_2m soiltype_bot_2m albedo_ncep maxsnowalb erod clayfrac_5m sandfrac_5m"
+ for i in ${Chem_Geog}; do
+  if [ ! -d $i ]; then
+   echo $i
+   wget https://www2.mmm.ucar.edu/wrf/src/wps_files/${i}.tar.bz2 -O ${i}.tar.bz2
+   tar -xvf ${i}.tar.bz2
+   rm ${i}.tar.bz2
+  fi
+ done
+ cd ..
+fi
+#######################################
+#       PREP_CHEM_SRC                 #
+#######################################
+if [ "$type" = "Chem" ]; then
+ echo "Do you want the PREP-CHEM-SRC program to be installed? PREP-CHEM-SRC is a widely used emission preparation program for WRF-Chem."
+ echo "please type yes or no"
+ read prep_chem_validation
+  if [ ${prep_chem_validation} = "yes" ]; then
+  echo "firstly starting to compile convert_emiss.exe. convert_emiss.exe is needed for convert emissions which are created from PREP-CHEM-SRC." 
+  cd WRF-${WRFversion}-${type}
+  logsave convert_emi.log ./compile emi_conv
+  cd ..
+  echo "Compilation of convert_emiss.exe is finished, now PREP-CHEM-SRC download and compilation has started."
+  [ -d "PREP-CHEM-SRC-1.5" ] && mv PREP-CHEM-SRC-1.5 PREP-CHEM-SRC-1.5-old
+  [ -f "prep_chem_sources_v1.5_24aug2015.tar.gz" ] && mv prep_chem_sources_v1.5_24aug2015.tar.gz prep_chem_sources_v1.5_24aug2015.tar.gz-old
+  wget ftp://aftp.fsl.noaa.gov/divisions/taq/global_emissions/prep_chem_sources_v1.5_24aug2015.tar.gz -O prep_chem_sources_v1.5_24aug2015.tar.gz
+  tar -zxvf prep_chem_sources_v1.5_24aug2015.tar.gz
+  cd PREP-CHEM-SRC-1.5/bin/build
+  sed -i "s#NETCDF=.*#NETCDF=/usr#" include.mk.gfortran.wrf
+  sed -i 's#-L$(NETCDF)/lib#-L/usr/lib/x86_64-linux-gnu#' include.mk.gfortran.wrf
+  sed -i "s#HDF5=.*#HDF5=/usr/lib/x86_64-linux-gnu/hdf5/serial#" include.mk.gfortran.wrf
+  sed -i "s#HDF5_INC=.*#HDF5_INC=-I/usr/include/hdf5/serial#" include.mk.gfortran.wrf
+  sed -i 's#-L$(HDF5)/lib#-L/usr/lib/x86_64-linux-gnu/hdf5/serial#' include.mk.gfortran.wrf
+  gfortversion=$(gfortran -dumpversion | cut -d '.' -f 1)
+  if [ "$gfortversion" -ge 10 ]; then
+  sed -i 's#F_OPTS=.*#F_OPTS=  -Xpreprocessor -D$(CHEM) -O2 -fconvert=big-endian -frecord-marker=4 -fallow-argument-mismatch#' include.mk.gfortran.wrf
+  fi
+  sed -i "s#-L/scratchin/grupos/catt-brams/shared/libs/gfortran/zlib-1.2.8/lib#-L/usr/lib#" include.mk.gfortran.wrf
+  sed -i "842s#.*#    'ENERGY     ',\&#" ../../src/edgar_emissions.f90
+  sed -i "843s#.*#    'INDUSTRY   ',\&#" ../../src/edgar_emissions.f90
+  sed -i "845s#.*#    'TRANSPORT  '/)#" ../../src/edgar_emissions.f90
+  make OPT=gfortran.wrf CHEM=RADM_WRF_FIM
+  cd ..
+  mkdir datain
+  cd datain
+  wget ftp://aftp.fsl.noaa.gov/divisions/taq/global_emissions/global_emissions_v3_24aug2015.tar.gz -O global_emissions_v3_24aug2015.tar.gz
+  tar -zxvf global_emissions_v3_24aug2015.tar.gz
+  mv Global_emissions_v3/* .
+  rm -r Global_emissions_v3
+  mv Emission_data/ EMISSION_DATA
+  mv surface_data/ SURFACE_DATA
+  cd ../../..
+  echo "PREP-CHEM-SRC compilation has finished."
+  fi
+fi
+##########################################################
+#	End						#
+##########################################################
+echo "Installation has completed"
+exec bash
+exit
+
