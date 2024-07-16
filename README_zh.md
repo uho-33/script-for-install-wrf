@@ -55,7 +55,7 @@ chmod u+x wrf_install
 ./wrf_install -hydro
 ```
 
-在安装过程中，WRF 与 WPS 编译所需的包（除 mpich）会采用 conda 进行安装。如果没有安装 conda，该脚本会自动安装 Miniconda，相关包默认会安装在名为 “WRF” 的环境中，你可以在运行脚本时更改 Miniconda 安装位置与环境的名称。mpich 会安装在 “./Build_WRF/mpich” 中。
+在安装过程中，WRF 与 WPS 编译所需的包会采用 conda 进行安装。如果没有安装 conda，该脚本会自动安装 Miniconda，相关包默认会安装在名为 “WRF” 的环境中，你可以在运行脚本时更改 Miniconda 安装位置与环境的名称。
 
 WRF 与 WPS 会通过 git clone 从官方仓库下载，如果你的网络并不稳定，你可以尝试多运行几次或者手动下载它们放置在安装目录中（请确保目录名为 “WRF” 和 “WPS”）。
 

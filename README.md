@@ -55,7 +55,7 @@ chmod u+x wrf_install
 ./wrf_install -hydro
 ```
 
-During the installation, necessary packages (except mpich) for compiling WRF and WPS will be installed with conda. If conda is not available on your system, the script will install Miniconda for you. The default environment for installing necessary packages is named “WRF,” but you can rename it when running the script. The `mpich` package will be installed in “./Build_WRF/mpich” by compilation.
+During the installation, necessary packages for compiling WRF and WPS will be installed with conda. If conda is not available on your system, the script will install Miniconda for you. The default environment for installing necessary packages is named “WRF,” but you can rename it when running the script.
 
 WRF and WPS will be downloaded via git clone from the official repository. If your network is unstable, you can re-run the script or manually download the repository and place it in your installation directory (ensure their names are “WRF” and “WPS”).
 
