@@ -194,8 +194,8 @@ if [ "$type" = "Chem" ]; then
 fi
 
 ###
-packagelist="git make cmake gfortran gcc=12.2.0 m4 curl perl libpng netcdf4 libnetcdf netcdf-fortran jasper=1.900.1 zlib ${extra_packages}"
-package4checks="git make cmake gfortran gcc m4 curl perl libpng netcdf4 libnetcdf netcdf-fortran jasper zlib ${extra_packages}"
+packagelist="git make cmake gfortran gcc=12.2.0 m4 curl perl libpng netcdf4 libnetcdf netcdf-fortran jasper=1.900.1 zlib mpich ${extra_packages}"
+package4checks="git make cmake gfortran gcc m4 curl perl libpng netcdf4 libnetcdf netcdf-fortran jasper zlib mpich ${extra_packages}"
 packagesnotinstalled=no
 
 if [ -z "$env_exist" ]; then
@@ -229,48 +229,12 @@ if [ "$packagesnotinstalled" = "yes" ]; then
     echo "Some packages were not installed, please install the missing packages and re-run the script."
     exit 1
 fi
-
-# Compile mpich#
-######################
-mpicc_status=$(which mpicc)
-mpiexec_status=$(which mpiexec)
-DIR=$(pwd)
-if [ -z "$mpicc_status" ] || [ -z "$mpiexec_status" ]; then
-    echo "cannot found mpich."
-    echo "mpich will be installed..."
-    mkdir Build_WRF
-    cd Build_WRF
-    mkdir packages
-    mkdir mpich
-    cd packages
-    wget https://www.mpich.org/static/downloads/4.2.2/mpich-4.2.2.tar.gz -O mpich-4.2.2.tar.gz
-    if [ $? -ne 0 ]; then
-    echo "Failed to download mpich. Please try re-run or download manually. Exiting the script."
-    exit 1
-    fi
-    tar xzvf mpich-4.2.2.tar.gz
-    cd mpich-4.2.2
-    ./configure --prefix="$DIR/Build_WRF/mpich/"
-    make 2>&1 | tee log.m
-    make install 2>&1 | tee log.mi
-    export PATH=$DIR/Build_WRF/mpich/bin:$PATH
-    mpicc_status=$(which mpicc)
-    mpiexec_status=$(which mpiexec)
-    if [ -z "$mpicc_status" ] || [ -z "$mpiexec_status" ]; then
-        echo "Failed to install mpich. Please try re-run or install it manually."
-        exit 1
-    fi
-    export MPICH_DIR=${DIR}/Build_WRF/mpich/
-else
-    export MPICH_DIR=$(dirname $(which mpicc))/..
-    echo "Find mpich in $MPICH_DIR. It will be used to compile WRF."
-fi
 echo "All required packages are installed."
 #########################################
 echo "" >> ~/.bashrc
 bashrc_exports=("#WRF Variables" "export PATH=${MPICH_DIR}/bin:$PATH" "export CC=gcc" "export CXX=g++" "export FC=gfortran" "export FCFLAGS=-m64" "export F77=gfortran" "export FFLAGS=-m64"
 		"export NETCDF=${CONDA_PREFIX}" "export HDF5=${CONDA_PREFIX}" "export LDFLAGS=-L${CONDA_PREFIX}/lib"
-		"export CPPFLAGS=-I${CONDA_PREFIX}/include" "export LD_LIBRARY_PATH=${MPICH_DIR}/lib:${CONDA_PREFIX}/lib" "export MPI_LIB=${MPICH_DIR}/lib" "export JASPERLIB=${CONDA_PREFIX}/lib" "export JASPERINC=${CONDA_PREFIX}/include")
+		"export CPPFLAGS=-I${CONDA_PREFIX}/include" "export MPICH_DIR=${CONDA_PREFIX}" "export LD_LIBRARY_PATH=${MPICH_DIR}/lib:${CONDA_PREFIX}/lib" "export MPI_LIB=${MPICH_DIR}/lib" "export JASPERLIB=${CONDA_PREFIX}/lib" "export JASPERINC=${CONDA_PREFIX}/include")
 for bashrc_export in "${bashrc_exports[@]}" ; do
 [[ -z $(grep "${bashrc_export}" ~/.bashrc) ]] && echo "${bashrc_export}" >> ~/.bashrc
 done
@@ -285,6 +249,7 @@ export HDF5=${CONDA_PREFIX}
 export LDFLAGS=-L${CONDA_PREFIX}/lib
 export CPPFLAGS=-I${CONDA_PREFIX}/include
 export LD_LIBRARY_PATH=${MPICH_DIR}/lib:${CONDA_PREFIX}/lib:$LD_LIBRARY_PATH
+export MPICH_DIR=${CONDA_PREFIX}
 export MPI_LIB=-L${MPICH_DIR}/lib
 export MPI_INCLUDE_DIR=${MPICH_DIR}/include
 export JASPERLIB=${CONDA_PREFIX}/lib
@@ -298,7 +263,7 @@ fi
 #########################################
 #	WRF Installation		            #
 #########################################
-cd $DIR
+DIR=$(pwd)
 skip_wrf_status="n"
 if [ -d "WRF" ]; then
     skip_wrf_status=$(get_non_empty_input "WARNING: WRF has existed. Do you want to skip install it? [y/n] ")
@@ -319,6 +284,7 @@ if [ "$skip_wrf_status" = "n" ]; then
 
     if [ "$type" = "Hydro" ]; then
         export WRF_HYDRO=1
+        mkdir Build_WRF
         cd Build_WRF/packages
         [ -f "v5.2.0.tar.gz" ] && mv v5.2.0.tar.gz v5.2.0.tar.gz-old
         wget https://github.com/NCAR/wrf_hydro_nwm_public/archive/refs/tags/v5.2.0.tar.gz -O v5.2.0.tar.gz
@@ -337,9 +303,6 @@ if [ "$skip_wrf_status" = "n" ]; then
 
     ( echo ${WRF_config1} ; echo ${WRF_config2} ) | ./configure
     sed -i 's#-L/usr/lib -lnetcdff -lnetcdf#-L${NETCDF}/lib -lnetcdff -lnetcdf#g' configure.wrf
-    sed -i 's#LIB_EXTERNAL    = \\#LIB_EXTERNAL    = $(MPI_LIB) -lmpifort -lmpicxx -lmpi  \\#g' configure.wrf
-    sed -i 's|-I$(NETCDFPATH)/include \\|-I$(NETCDFPATH)/include -I$(MPICH_DIR)/include \\|' configure.wrf
-    # cp -r $MPICH_DIR/include $NETCDF/include
     gfortversion=$(gfortran -dumpversion | cut -d '.' -f 1)
     if [ "$gfortversion" -lt 8 ] && [ "$gfortversion" -ge 6 ]; then
     sed -i '/-DBUILD_RRTMG_FAST=1/d' configure.wrf
